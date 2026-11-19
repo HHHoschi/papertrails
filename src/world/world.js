@@ -586,6 +586,68 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
     return r !== null && r.cx === cx && r.cz === cz ? r : null;
   }
 
+  // ---- knock-over (the dino's pistol) ----------------------------------------------------------------
+  // Every stand-up piece of a tile belongs to one knock group: its top flap (tree, fence, bush, sign ...), or for a
+  // house the whole box (all flaps sharing one house pivot). A hit group tips over about the horizontal axis through
+  // its foot, away from the shot, and stays down (also when the tile folds away and comes back: `knocked`).
+  const KNOCK_DEG = 84; // not quite flat: the fallen card lies on the page without fighting its print
+  const KNOCK_TIME = 0.55; // s from the hit until it lands
+  const knocked = new Map(); // 'cx,cz' -> Map(group -> [dirX, dirZ])
+  function knockGroups(g, meshes, sp) {
+    const gid = new Int16Array(meshes.length).fill(-1);
+    const keys = new Map();
+    const piv = [];
+    for (let i = 0; i < meshes.length; i++) {
+      let top = meshes[i];
+      while (top.parent && top.parent !== g) top = top.parent;
+      if (top.parent !== g || !(top.userData && top.userData.hinge)) continue; // the flat page print never falls
+      const house = sp.cardJ !== null && sp.card !== null && sp.card[i] !== null && sp.cardJ[i] > 150 && sp.cardP !== null;
+      const key = house ? sp.cardP[i] : top;
+      let id = keys.get(key);
+      if (id === undefined) { id = piv.length; keys.set(key, id); piv.push(house ? { node: null, local: sp.cardP[i] } : { node: top, local: null }); }
+      gid[i] = id;
+    }
+    const n = piv.length;
+    return { gid, piv, n, prog: new Float32Array(n), dir: new Float32Array(n * 2), fallingAny: false };
+  }
+  const _kp = new THREE.Vector3();
+  const _km = new THREE.Matrix4();
+  const _kax = new THREE.Vector3();
+  /** _m (world matrix of instance i) tips over with its knock group (no-op for standing pieces). */
+  function knockFix(rec, i) {
+    const ko = rec.ko;
+    const k = ko.gid[i];
+    if (k < 0 || ko.prog[k] <= 0) return;
+    const pv = ko.piv[k];
+    if (pv.node !== null) { const e = pv.node.matrixWorld.elements; _kp.set(e[12], e[13], e[14]); } else _kp.copy(pv.local).applyMatrix4(rec.group.matrixWorld);
+    const t = ko.prog[k];
+    const ang = KNOCK_DEG * Math.PI / 180 * t * t; // falls like a board: slow start, fast landing
+    const dx = ko.dir[2 * k]; const dz = ko.dir[2 * k + 1];
+    _km.makeRotationAxis(_kax.set(dz, 0, -dx), ang);
+    const e = _km.elements;
+    e[12] = _kp.x - (e[0] * _kp.x + e[4] * _kp.y + e[8] * _kp.z);
+    e[13] = _kp.y - (e[1] * _kp.x + e[5] * _kp.y + e[9] * _kp.z);
+    e[14] = _kp.z - (e[2] * _kp.x + e[6] * _kp.y + e[10] * _kp.z);
+    _m.premultiply(_km);
+  }
+  function stepKnock(rec, dt) {
+    const ko = rec.ko;
+    let any = false;
+    for (let k = 0; k < ko.n; k++) {
+      const t = ko.prog[k];
+      if (t <= 0 || t >= 1) continue;
+      ko.prog[k] = Math.min(1, t + dt / KNOCK_TIME);
+      if (ko.prog[k] >= 1) {
+        const e = ko.piv[k].node !== null ? ko.piv[k].node.matrixWorld.elements : null;
+        const x = e ? e[12] : rec.cx * TILE_SIZE; const z = e ? e[14] : rec.cz * TILE_SIZE;
+        bus.emit('fold', { x, z, dir: 'down', tileId: rec.cell ? rec.cell.tileId : rec.model, size: 0.8, pan: 0, layer: 0 }); // the paper slap on landing
+        bus.emit('knock:landed', { x, z });
+      } else any = true;
+    }
+    ko.fallingAny = any;
+    rec.dirty = true;
+  }
+
   function createRecord(model) {
     const g = assets.getTilePrototype(model).clone(true);
     g.matrixAutoUpdate = true;
@@ -676,7 +738,8 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
       room = new Float32Array(meshes.length); roomH = new Float32Array(meshes.length); roomW = new Float32Array(meshes.length);
       for (let i = 0; i < meshes.length; i++) { const d = sp.card[i] !== null ? dims.get(sp.card[i]) : undefined; if (d) { roomH[i] = d[0]; roomW[i] = d[1]; } }
     }
-    return { card: sp.card, cardS: sp.cardS, cardJ: sp.cardJ, cardP: sp.cardP, thin: sp.thin, thinAny: sp.thinAny, room, roomH, roomW, roomOn: false, cls, bushy, keep, hide: null, key: '', cx: 0, cz: 0, cell: null, group: g, fold, info, model, meshes, inst, shown: false, pending: false, guard: false, held: 0, timer: 0, dirty: false, index: -1, flipAt: -1e9, biome: 0, swayIdx: Int16Array.from(swayIdx), spins, wind: 1, cy: 1, sy: 0 };
+    const ko = knockGroups(g, meshes, sp);
+    return { ko, card: sp.card, cardS: sp.cardS, cardJ: sp.cardJ, cardP: sp.cardP, thin: sp.thin, thinAny: sp.thinAny, room, roomH, roomW, roomOn: false, cls, bushy, keep, hide: null, key: '', cx: 0, cz: 0, cell: null, group: g, fold, info, model, meshes, inst, shown: false, pending: false, guard: false, held: 0, timer: 0, dirty: false, index: -1, flipAt: -1e9, biome: 0, swayIdx: Int16Array.from(swayIdx), spins, wind: 1, cy: 1, sy: 0 };
   }
 
   /**
@@ -818,6 +881,7 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
       const i = ix[j];
       _m.copy(ms[i].matrixWorld);
       if (rec.card !== null && rec.card[i] !== null) cardFix(rec, i);
+      knockFix(rec, i);
       const e = _m.elements;
       e[12] -= origin.x; e[13] -= origin.y; e[14] -= origin.z;
       rec.inst[i].b.mesh.setMatrixAt(rec.inst[i].id, _m);
@@ -830,6 +894,7 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
     for (let i = 0; i < ms.length; i++) {
       _m.copy(ms[i].matrixWorld);
       if (rec.card !== null && rec.card[i] !== null) cardFix(rec, i);
+      knockFix(rec, i);
       const e = _m.elements;
       e[12] -= origin.x; e[13] -= origin.y; e[14] -= origin.z;
       rec.inst[i].b.mesh.setMatrixAt(rec.inst[i].id, _m);
@@ -929,6 +994,9 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
     }
     cullFor(rec, cell, cx, cz);
     if (rec.room !== null) { rec.room.fill(0); rec.roomOn = false; }
+    rec.ko.prog.fill(0); rec.ko.fallingAny = false;
+    const down = knocked.get(rec.key);
+    if (down) for (const [k, d] of down) if (k < rec.ko.n) { rec.ko.prog[k] = 1; rec.ko.dir[2 * k] = d[0]; rec.ko.dir[2 * k + 1] = d[1]; }
     rec.fold.snap(0);
     rec.shown = false; rec.pending = false; rec.timer = 0; rec.dirty = true; rec.flipAt = -1e9;
     rec.index = activeList.length;
@@ -1122,6 +1190,7 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
         }
         const moving = !fold.settled;
         if (moving) { fold.update(dt); movingCount++; }
+        if (rec.ko.fallingAny) stepKnock(rec, dt);
         if (WIND_ON && rec.spins && (moving || rec.dirty)) fold.applyWind(state.time, -1, 0.6 + 0.4 * rec.wind, rec.cy, rec.sy); // sails keep turning while the tile folds
         if (moving || rec.dirty) {
           writeMatrices(rec);
@@ -1355,6 +1424,57 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
         }
       }
       return false;
+    },
+    /**
+     * The dino's pistol: the first stand-up piece on the segment from (ox, oy, oz) along the unit direction (dx, dy, dz)
+     * up to `far` (tested against each piece's box as drawn). A hit piece starts to fall over, away from the shot.
+     * Returns the distance to the hit, or -1. Fallen pieces, hidden pieces and the flat page prints are not hit.
+     */
+    shoot(ox, oy, oz, dx, dy, dz, far) {
+      let best = far; let bRec = null; let bK = -1;
+      for (let n = 0; n < activeList.length; n++) {
+        const rec = activeList[n];
+        if (!rec.shown || rec.fold.target !== 1 || rec.fold.progress < 0.55 || rec.ko.n === 0) continue;
+        const cxw = rec.cx * TILE_SIZE - ox; const czw = rec.cz * TILE_SIZE - oz;
+        let u = cxw * dx + czw * dz; if (u < 0) u = 0; else if (u > far) u = far;
+        if (hypot2(cxw - dx * u, czw - dz * u) > HALF * 1.5 + 0.35) continue;
+        const ms = rec.meshes; const hide = rec.hide; const ko = rec.ko;
+        for (let i = 0; i < ms.length; i++) {
+          const k = ko.gid[i];
+          if (k < 0 || ko.prog[k] > 0 || (hide !== null && hide[i])) continue;
+          const g = ms[i].geometry; if (!g) continue;
+          if (g.boundingBox === null) g.computeBoundingBox();
+          const bb = g.boundingBox;
+          _m.copy(ms[i].matrixWorld);
+          if (rec.card !== null && rec.card[i] !== null) cardFix(rec, i);
+          _sv.set(ox, oy, oz).applyMatrix4(_si.copy(_m).invert());
+          _sd.set(dx, dy, dz).transformDirection(_si);
+          const me = _m.elements;
+          const sc = Math.hypot(me[0], me[1], me[2]) || 1;
+          let t0 = 0; let t1 = best / sc; let ok = true;
+          for (let a = 0; a < 3 && ok; a++) {
+            const o = a === 0 ? _sv.x : a === 1 ? _sv.y : _sv.z; const d = a === 0 ? _sd.x : a === 1 ? _sd.y : _sd.z;
+            const pad = 0.02 / sc; // a thin card still catches the shot
+            const lo = (a === 0 ? bb.min.x : a === 1 ? bb.min.y : bb.min.z) - pad; const hi = (a === 0 ? bb.max.x : a === 1 ? bb.max.y : bb.max.z) + pad;
+            if (Math.abs(d) < 1e-7) { if (o < lo || o > hi) ok = false; continue; }
+            let ta = (lo - o) / d; let tb = (hi - o) / d; if (ta > tb) { const q = ta; ta = tb; tb = q; }
+            if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) ok = false;
+          }
+          if (!ok) continue;
+          const t = t0 * sc;
+          if (t < best) { best = t; bRec = rec; bK = k; }
+        }
+      }
+      if (bRec === null) return -1;
+      sight.lastShot = bRec.model + ':' + (bRec.ko.piv[bK].node ? bRec.ko.piv[bK].node.name : 'house'); // what was hit (debugging aid, like sight.last)
+      const hl = hypot2(dx, dz) || 1;
+      const ko = bRec.ko;
+      ko.prog[bK] = 1e-3; ko.dir[2 * bK] = dx / hl; ko.dir[2 * bK + 1] = dz / hl; ko.fallingAny = true;
+      let down = knocked.get(bRec.key);
+      if (!down) knocked.set(bRec.key, (down = new Map()));
+      down.set(bK, [dx / hl, dz / hl]);
+      bRec.dirty = true;
+      return best;
     },
     get viewReach() { return reach; },
     faceCamera() {
