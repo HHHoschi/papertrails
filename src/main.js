@@ -22,6 +22,7 @@ import { createLife } from './life/life.js';
 import { createAnimals } from './life/animals.js';
 import { createGame } from './game/index.js';
 import { createViews } from './camera/views.js';
+import { createMobileControls } from './ui/mobile-controls.js';
 // Allocation-free two-dimensional length.
 const hypot2 = (a, b) => Math.sqrt(a * a + b * b);
 
@@ -51,6 +52,7 @@ async function boot() {
   const follow = createFollowCamera({ aspect: window.innerWidth / Math.max(1, window.innerHeight) });
   const controls = createControls({ domElement: canvas, camera: follow.camera, traveller });
   const views = createViews({ follow }); // V cycles camera views
+  createMobileControls(); // on touch devices: adds Run / Map / Night / View / Music buttons
   const post = createPost({ renderer, scene, camera: follow.camera, quality });
   const audio = createPaperAudio({ muted });
   const music = createMusic({ audio });
