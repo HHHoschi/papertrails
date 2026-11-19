@@ -23,6 +23,7 @@ import { createAnimals } from './life/animals.js';
 import { createGame } from './game/index.js';
 import { createViews } from './camera/views.js';
 import { createMobileControls } from './ui/mobile-controls.js';
+import { createBlaster } from './game/blaster.js';
 // Allocation-free two-dimensional length.
 const hypot2 = (a, b) => Math.sqrt(a * a + b * b);
 
@@ -64,6 +65,8 @@ async function boot() {
   // Gameplay progress is saved independently for each world seed.
   const game = createGame({ scene, renderer, world, wfc, traveller, follow, controls, lights, post, daynight, music, audio, life, assets, materials, seed, quality });
   follow.setAssistGate(game.modal);
+  // Space / F: the dino fires its pistol; a hit piece of the world tips over (game/blaster.js, world.shoot)
+  const blaster = createBlaster({ scene, world, traveller, modal: game.modal });
   // N: day / night, M: music on / off (keys only - no on-screen UI)
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -103,6 +106,7 @@ async function boot() {
     if (life) life.update(dt, p, follow.camera);
     if (animals) animals.update(dt);
     game.update(dt);
+    blaster.update(dt);
     lights.update(dt, traveller, follow.camera);
     materials.update(dt);
   }

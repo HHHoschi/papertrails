@@ -69,6 +69,9 @@ export function createMobileControls() {
   const view = tapButton('◉', 'Kamera (V)'); // ◉
   const music = tapButton('♪', 'Musik (M)'); // ♪
   const run = tapButton('››', 'Halten zum Rennen'); // ››
+  const fire = tapButton('✹', 'Schießen (Leertaste)');
+  fire.style.width = fire.style.height = '56px';
+  fire.style.background = 'rgba(232, 104, 42, 0.6)';
 
   const tapToggle = (btn, code) => {
     btn.addEventListener('pointerdown', (e) => {
@@ -80,6 +83,7 @@ export function createMobileControls() {
   tapToggle(night, 'KeyN');
   tapToggle(view, 'KeyV');
   tapToggle(music, 'KeyM');
+  fire.addEventListener('pointerdown', (e) => { e.preventDefault(); dispatchKey('keydown', { code: 'KeyF', key: 'f' }); });
 
   // Run: held, not toggled - mirrors Shift down/up exactly so controls.js's own run/speed logic is untouched.
   let runHeld = false;
@@ -102,7 +106,7 @@ export function createMobileControls() {
   run.addEventListener('pointercancel', releaseRun);
   run.addEventListener('pointerleave', releaseRun);
 
-  for (const b of [map, night, view, music, run]) { b.style.pointerEvents = 'auto'; root.appendChild(b); }
+  for (const b of [map, night, view, music, run, fire]) { b.style.pointerEvents = 'auto'; root.appendChild(b); }
   document.body.appendChild(root);
 
   function dispose() {
