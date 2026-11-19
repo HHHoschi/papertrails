@@ -1,0 +1,57 @@
+{
+  "cover": {
+    "title": "Skizzenbuch",
+    "author": "Jörg Dittmann",
+    "hint": "Zum Öffnen klicken"
+  },
+  "works": [
+    {
+      "id": "arbeit-1",
+      "title": "Arbeit 1",
+      "year": "2026",
+      "text": "Ein, zwei Sätze zu dieser Arbeit: Worum geht es, wie ist sie entstanden, was war das Besondere daran?",
+      "image": "platzhalter-1.jpg",
+      "link": ""
+    },
+    {
+      "id": "arbeit-2",
+      "title": "Arbeit 2",
+      "year": "2026",
+      "text": "Ein, zwei Sätze zu dieser Arbeit: Worum geht es, wie ist sie entstanden, was war das Besondere daran?",
+      "image": "platzhalter-2.jpg",
+      "link": ""
+    },
+    {
+      "id": "arbeit-3",
+      "title": "Arbeit 3",
+      "year": "2026",
+      "text": "Ein, zwei Sätze zu dieser Arbeit: Worum geht es, wie ist sie entstanden, was war das Besondere daran?",
+      "image": "platzhalter-3.jpg",
+      "link": ""
+    },
+    {
+      "id": "arbeit-4",
+      "title": "Arbeit 4",
+      "year": "2026",
+      "text": "Ein, zwei Sätze zu dieser Arbeit: Worum geht es, wie ist sie entstanden, was war das Besondere daran?",
+      "image": "platzhalter-4.jpg",
+      "link": ""
+    },
+    {
+      "id": "arbeit-5",
+      "title": "Arbeit 5",
+      "year": "2026",
+      "text": "Ein, zwei Sätze zu dieser Arbeit: Worum geht es, wie ist sie entstanden, was war das Besondere daran?",
+      "image": "platzhalter-5.jpg",
+      "link": ""
+    },
+    {
+      "id": "arbeit-6",
+      "title": "Arbeit 6",
+      "year": "2026",
+      "text": "Ein, zwei Sätze zu dieser Arbeit: Worum geht es, wie ist sie entstanden, was war das Besondere daran?",
+      "image": "platzhalter-6.jpg",
+      "link": ""
+    }
+  ]
+}
