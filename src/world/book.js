@@ -499,6 +499,9 @@ export function createBook({ scene, assets, wfc, materials, quality }) {
     uBiomePathE: { value: biomePathUniforms().edge },
     uWorld0: { value: new THREE.Vector2() },
     uTrav: { value: new THREE.Vector4(0, 0, B.fadeNear ?? 8, B.fadeFar ?? 13.5) },
+    // opening sequence (game/intro.js): x = on, y = ink radius, zw = ink centre (world); rect = visible page (world minX, minZ, maxX, maxZ)
+    uIntro: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uIntroRect: { value: new THREE.Vector4(-1e4, -1e4, 1e4, 1e4) },
     ...waterUniforms(),
     ...REFLECT.uniforms,   // shortfall pass: planar mirror image of the upright paper (render/water.js renderReflection)
   };
@@ -532,16 +535,31 @@ export function createBook({ scene, assets, wfc, materials, quality }) {
     m.customProgramCacheKey = () => (prevKey ? prevKey.call(m) : '') + '|' + key;
     m.needsUpdate = true;
   }
+  // opening sequence: only the book's two pages show (the rest of the endless page is cut away), and the print inks in
+  // from a growing, ragged circle; outside it the page is still blank paper.
+  const INTRO_GLSL = /* glsl */ `
+if (uIntro.x > 0.5) {
+  if (vIntroW.x < uIntroRect.x || vIntroW.y < uIntroRect.y || vIntroW.x > uIntroRect.z || vIntroW.y > uIntroRect.w) discard;
+  vec2 ir = vIntroW - uIntro.zw;
+  float ia = atan(ir.y, ir.x);
+  float iw = uIntro.y + 0.55 * sin(ia * 5.0 + uIntro.y * 0.7) + 0.35 * sin(ia * 11.0 - uIntro.y * 1.3);
+  float ik = smoothstep(iw, iw - 1.6, length(ir));
+  diffuseColor.rgb = mix(uCream * 1.04, diffuseColor.rgb, ik);
+}
+`;
   const pageMat = paperLike({ color: '#ffffff', side: THREE.FrontSide, map: uniqueMap(), fibre: 'none', vary: false });
   chain(pageMat, (shader) => {
-    bind(shader, ['uAtlas', 'uCells', 'uFibre', 'uFibreN', 'uOff', 'uAnchorMod', 'uBk', 'uGut', 'uGut2', 'uCrease', 'uFib', 'uFib2', 'uFibMean', 'uCream', 'uBiomeG', 'uBiomeGK', 'uBiomeP', 'uBiomePK', 'uBiomePath', 'uBiomePathE', 'uWorld0', 'uTrav', 'uWat', 'uWat2', 'uGnd', 'uWatPal', 'uReflTex', 'uReflMat', 'uRefl', 'uRefl2']);
+    bind(shader, ['uIntro', 'uIntroRect', 'uAtlas', 'uCells', 'uFibre', 'uFibreN', 'uOff', 'uAnchorMod', 'uBk', 'uGut', 'uGut2', 'uCrease', 'uFib', 'uFib2', 'uFibMean', 'uCream', 'uBiomeG', 'uBiomeGK', 'uBiomeP', 'uBiomePK', 'uBiomePath', 'uBiomePathE', 'uWorld0', 'uTrav', 'uWat', 'uWat2', 'uGnd', 'uWatPal', 'uReflTex', 'uReflMat', 'uRefl', 'uRefl2']);
     const hasPools = shader.fragmentShader.includes('uPaperPoolCol') && shader.fragmentShader.includes('varying vec3 vPaperW');
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vPg;\nvarying vec4 vReflP;\nuniform mat4 uReflMat;\n' + GUTTER_GLSL)
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPg = position.xz;\nvReflP = uReflMat * (modelMatrix * vec4(position.x, 0.0, position.z, 1.0));\ntransformed.y += gutterH(position.xz, 0.0);');
+      .replace('#include <common>', '#include <common>\nvarying vec2 vPg;\nvarying vec2 vIntroW;\nvarying vec4 vReflP;\nuniform mat4 uReflMat;\n' + GUTTER_GLSL)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPg = position.xz;\nvIntroW = (modelMatrix * vec4(position, 1.0)).xz;\nvReflP = uReflMat * (modelMatrix * vec4(position.x, 0.0, position.z, 1.0));\ntransformed.y += gutterH(position.xz, 0.0);');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', /* glsl */ `#include <common>
 varying vec2 vPg;
+varying vec2 vIntroW;
+uniform vec4 uIntro;
+uniform vec4 uIntroRect;
 uniform highp sampler2DArray uAtlas;
 uniform sampler2D uCells;
 uniform sampler2D uFibre;
@@ -721,10 +739,10 @@ vec3 pageColor() {
   gPageTilt = tilt;
   return col;
 }`)
-      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = pageColor();' + (hasPools ? WATER_GLOW_GLSL : '') + WATER_MIRROR_GLSL)
+      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = pageColor();' + (hasPools ? WATER_GLOW_GLSL : '') + WATER_MIRROR_GLSL + INTRO_GLSL)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(normal + mat3(viewMatrix) * vec3(gPageTilt.x, 0.0, gPageTilt.y));');
     if (!shader.fragmentShader.includes('diffuseColor.rgb = pageColor();')) console.warn('[book] page shader hook not applied (unexpected material)');
-  }, 'book-page-v12-page');
+  }, 'book-page-v12-page-intro');
 
   const pageGeo = new THREE.PlaneGeometry(HW * 2, HD * 2, Math.round(HW * 2 / 0.1), 8).rotateX(-Math.PI / 2);
   const page = new THREE.Mesh(pageGeo, pageMat);
@@ -996,6 +1014,13 @@ vec3 pageColor() {
       return -B.gutterDepth * a * a * gutterFade;
     },
     get gutterX() { return gutterWorld; },
+    /** Opening sequence (game/intro.js): null = off; else { rect: [minX, minZ, maxX, maxZ], ink: [x, z, radius] } (world). */
+    setIntro(o) {
+      if (!o) { U.uIntro.value.x = 0; block.visible = true; cover.visible = true; return; }
+      U.uIntro.value.set(1, o.ink[2], o.ink[0], o.ink[1]);
+      U.uIntroRect.value.set(o.rect[0], o.rect[1], o.rect[2], o.rect[3]);
+      block.visible = false; cover.visible = false;
+    },
     get baked() { return baked; },
     atlas,
     modelIndex,

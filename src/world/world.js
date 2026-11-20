@@ -1106,7 +1106,9 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
       if (instant || last.fresh) reach = wantReach;
       else if (reach !== wantReach) { const st = dt * (W.viewReachRate ?? 0.85); reach += Math.max(-st, Math.min(st, wantReach - reach)); }
     }
-    const RV = REVEAL_RADIUS + reach; const NEARV = NEAR + reach;
+    // opening sequence (game/intro.js): state.introRise 0..1 grows the ring from nothing, so the world rises in a wave from the traveller
+    const IR = state.introRise === undefined ? 1 : Math.max(0, Math.min(1, state.introRise));
+    const RV = (REVEAL_RADIUS + reach) * IR; const NEARV = (NEAR + reach) * IR;
     syncView();
     makeRoom(dt, instant || last.fresh);
     const tx = last.x / TILE_SIZE; const tz = last.z / TILE_SIZE;
@@ -1360,6 +1362,8 @@ export function createWorld({ scene, assets, wfc, materials, quality }) {
     debugResetFields() { modelData.clear(); },
     /** checks: bake layout of the page print (book.js debugBake). */
     get debugBake() { return book.debugBake; },
+    /** The open book (book.js): the opening sequence cuts it to two pages and inks the print in. */
+    book,
     /** checks: the DRAWN world matrix of instance i of a live record (fold pose + the gold-pass card / house fix). */
     drawnMatrix(rec, i, out) {
       _m.copy(rec.meshes[i].matrixWorld);
