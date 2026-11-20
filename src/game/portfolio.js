@@ -1,12 +1,13 @@
 // Portfolio (owner: game). The sketchbook shows Jörg's works: framed paper pictures stand along a winding trail from
 // the start; walking up to one opens it large (image, title, year, text, link). Content: public/portfolio/works.json
 // ({ cover: { title, author, hint }, works: [{ id, title, year, text, image, link }] }), images next to it.
-// A sketchbook cover is shown first and opens on a click (?cover=0 skips it). ?portfolio=0 turns all of this off.
+// The closed sketchbook at the start is game/intro.js. ?portfolio=0 turns all of this off.
 //
 // Stations rise out of the page like the tiles (a spring on a hinge at their foot) when the traveller comes near and
 // fold flat again when he leaves. Visited works are remembered in localStorage.
 import * as THREE from 'three';
 import { bus } from '../core/events.js';
+import { state } from '../core/state.js';
 
 const BASE = './portfolio/';
 const RISE_NEAR = 3.4; // world units: stand up inside this distance ...
@@ -27,34 +28,6 @@ function el(tag, cls, parent, text) {
 }
 
 const CSS = `
-.pf-cover { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(ellipse at 50% 45%, #3a271b 0%, #1c130d 70%); perspective: 1600px; cursor: pointer;
-  transition: opacity 0.9s ease 0.9s; font-family: Georgia, 'Times New Roman', serif; }
-.pf-cover.gone { opacity: 0; pointer-events: none; }
-.pf-book { position: relative; width: min(64vw, 460px); aspect-ratio: 3 / 4; transform-style: preserve-3d;
-  transform: rotateX(8deg); transition: transform 1.4s cubic-bezier(.3,.1,.2,1); }
-.pf-cover.open .pf-book { transform: rotateX(0deg) translateX(min(16vw, 115px)) scale(1.04); }
-.pf-page, .pf-front { position: absolute; inset: 0; border-radius: 4px 14px 14px 4px; }
-.pf-page { background: #fbf6ea; box-shadow: 0 30px 60px rgba(0,0,0,.55), inset 12px 0 18px -10px rgba(80,50,20,.35);
-  background-image: repeating-linear-gradient(0deg, transparent 0 27px, rgba(120,150,190,.18) 27px 28px); }
-.pf-page::after { content: ''; position: absolute; left: 14%; top: 22%; width: 60%; height: 40%;
-  border: 2px solid rgba(60,40,30,.35); border-radius: 46% 54% 40% 60%; transform: rotate(-6deg); }
-.pf-front { transform-origin: left center; transition: transform 1.4s cubic-bezier(.5,.05,.3,1); backface-visibility: hidden;
-  background: #8a3b22; background-image: radial-gradient(circle at 30% 20%, rgba(255,255,255,.08), transparent 60%),
-  repeating-linear-gradient(45deg, rgba(0,0,0,.04) 0 2px, transparent 2px 5px);
-  box-shadow: 0 30px 60px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.25), inset 10px 0 0 rgba(0,0,0,.18);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; color: #f6e7c8; text-align: center; }
-.pf-cover.open .pf-front { transform: rotateY(-165deg); }
-.pf-front .t { font-size: clamp(28px, 6vw, 46px); letter-spacing: .06em; }
-.pf-front .a { margin-top: 14px; font-size: clamp(14px, 2.4vw, 18px); letter-spacing: .2em; text-transform: uppercase; opacity: .85; }
-.pf-front .label { border: 1.5px solid rgba(246,231,200,.6); padding: 26px 30px; background: rgba(0,0,0,.08); }
-.pf-band { position: absolute; top: -2%; bottom: -2%; right: 13%; width: 14px; background: #2b1d16; border-radius: 3px;
-  box-shadow: 0 0 6px rgba(0,0,0,.5); transition: opacity .3s; }
-.pf-cover.open .pf-band { opacity: 0; }
-.pf-hint { position: absolute; bottom: 6vh; left: 0; right: 0; text-align: center; color: rgba(255,240,214,.75);
-  font: 500 13px/1 Georgia, serif; letter-spacing: .16em; transition: opacity .4s; }
-.pf-cover.open .pf-hint { opacity: 0; }
-
 .pf-view { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
   background: rgba(20, 13, 8, 0.55); opacity: 0; pointer-events: none; transition: opacity .35s ease; padding: 16px; box-sizing: border-box; }
 .pf-view.on { opacity: 1; pointer-events: auto; }
@@ -86,32 +59,7 @@ export function createPortfolio(ctx) {
   let visited = {};
   try { visited = JSON.parse(localStorage.getItem(VISITED_KEY) || '{}') || {}; } catch { visited = {}; }
 
-  // ---- cover -------------------------------------------------------------------------------------
-  const api = { open: false, cover: params.get('cover') !== '0', update, dispose, stations };
-  let coverEl = null;
-  function buildCover(c) {
-    coverEl = el('div', 'pf-cover', document.body);
-    const book = el('div', 'pf-book', coverEl);
-    el('div', 'pf-page', book);
-    const front = el('div', 'pf-front', book);
-    const label = el('div', 'label', front);
-    el('div', 't', label, (c && c.title) || 'Skizzenbuch');
-    if (c && c.author) el('div', 'a', label, c.author);
-    el('div', 'pf-band', front);
-    el('div', 'pf-hint', coverEl, (c && c.hint) || 'Zum Öffnen klicken');
-    const openIt = (e) => {
-      if (e) { e.preventDefault(); e.stopPropagation(); }
-      if (coverEl.classList.contains('open')) return;
-      coverEl.classList.add('open');
-      bus.emit('input:first', {}); // the click is the first gesture: audio may start
-      setTimeout(() => { coverEl.classList.add('gone'); }, 900);
-      setTimeout(() => { api.cover = false; coverEl.remove(); coverEl = null; }, 2000);
-      window.removeEventListener('keydown', onCoverKey, true);
-    };
-    function onCoverKey(e) { e.preventDefault(); e.stopPropagation(); if (e.code === 'Enter' || e.code === 'Space') openIt(); }
-    coverEl.addEventListener('pointerdown', openIt);
-    window.addEventListener('keydown', onCoverKey, true); // nothing reaches the game until the book is open
-  }
+  const api = { open: false, cover: false, update, dispose, stations };
 
   // ---- large view ----------------------------------------------------------------------------------
   const view = el('div', 'pf-view', document.body);
@@ -241,8 +189,7 @@ export function createPortfolio(ctx) {
 
   fetch(BASE + 'works.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
     data = j && Array.isArray(j.works) ? j : { works: [] };
-    if (api.cover) buildCover(data.cover);
-  }).catch(() => { data = { works: [] }; api.cover = false; });
+  }).catch(() => { data = { works: [] }; });
 
   const K = 60; const C = 9; // hinge spring (stiff, a little bouncy, like the tile flaps)
   function update(dt) {
@@ -251,7 +198,8 @@ export function createPortfolio(ctx) {
     const p = traveller.position;
     for (const st of stations) {
       const d = Math.hypot(p.x - st.x, p.z - st.z);
-      if (d < RISE_NEAR) st.target = 1; else if (d > RISE_FAR) st.target = 0;
+      const k = state.introRise === undefined ? 1 : state.introRise; // the opening sequence lets them rise with the world
+      if (d < RISE_NEAR * k) st.target = 1; else if (d > RISE_FAR * Math.max(k, 0.01)) st.target = 0;
       if (st.p !== st.target || st.v !== 0) {
         const h = Math.min(dt, 1 / 30);
         st.v += (K * (st.target - st.p) - C * st.v) * h;
@@ -269,7 +217,7 @@ export function createPortfolio(ctx) {
   function dispose() {
     window.removeEventListener('keydown', onKey, true);
     for (const st of stations) { scene.remove(st.root); st.tex.dispose(); st.picMat.dispose(); }
-    view.remove(); style.remove(); if (coverEl) coverEl.remove();
+    view.remove(); style.remove();
   }
   return api;
 }
